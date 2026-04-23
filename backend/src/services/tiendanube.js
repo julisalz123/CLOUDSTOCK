@@ -22,7 +22,7 @@ async function getAllProducts(storeId, accessToken) {
 
   while (hasMore) {
     const { data } = await client.get('/products', {
-      params: { page, per_page: 200, fields: 'id,name,variants,sku' },
+      params: { page, per_page: 200 },
     });
     if (!data || data.length === 0) {
       hasMore = false;
