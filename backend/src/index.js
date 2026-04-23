@@ -4,7 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
-
+app.set('trust proxy', 1);
 // ============================================================
 // CORS
 // ============================================================
