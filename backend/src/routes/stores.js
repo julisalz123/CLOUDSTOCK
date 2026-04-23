@@ -14,10 +14,11 @@ router.post('/tiendanube', auth, async (req, res) => {
     const { storeId, accessToken, storeName } = req.body;
     if (!storeId || !accessToken) return res.status(400).json({ error: 'Faltan datos de TN' });
 
-    // Valida que los datos funcionan traiendo el primer producto
+// Valida que los datos funcionan
     try {
       await tnService.getAllProducts(storeId, accessToken);
-    } catch {
+    } catch (err) {
+      console.error('Error validando TN:', err.response?.data || err.message);
       return res.status(400).json({ error: 'No se pudo conectar a Tiendanube. Verificá el Store ID y Access Token.' });
     }
 
