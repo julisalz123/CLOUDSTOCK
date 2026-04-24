@@ -141,6 +141,14 @@ if (existingTNOrder[0]) {
     console.error('Error trayendo producto TN en webhook:', err.message);
   }
 }
+    if (eventType === 'order/cancelled') {
+  const order = event.data || event;
+  await pool.query(
+    `UPDATE orders SET status = 'cancelled' WHERE platform_order_id = $1 AND platform = 'tiendanube'`,
+    [String(order.id)]
+  );
+  console.log('Orden TN cancelada:', order.id);
+}
 
   } catch (err) {
     console.error('Error procesando webhook TN:', err);
