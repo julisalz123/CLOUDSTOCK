@@ -41,6 +41,16 @@ console.log('Store ID detectado:', storeId);
       const order = event.data || event;
       if (!order.products) return;
 
+// Verificar si esta orden ya fue procesada
+const { rows: existingTNOrder } = await pool.query(
+  `SELECT id FROM orders WHERE platform_order_id = $1 AND platform = 'tiendanube'`,
+  [String(order.id)]
+);
+if (existingTNOrder[0]) {
+  console.log('Orden TN ya procesada, ignorando:', order.id);
+  return;
+}
+
       const items = order.products.map(p => ({
         product_id: p.product_id,
         variant_id: p.variant_id,
@@ -135,6 +145,15 @@ router.post('/mercadolibre', async (req, res) => {
     // Trae los detalles de la orden
     const order = await mlService.getOrder(userId, resourceId);
     if (!order || order.status !== 'paid') return;
+
+const { rows: existingMLOrder } = await pool.query(
+  `SELECT id FROM orders WHERE platform_order_id = $1 AND platform = 'mercadolibre'`,
+  [String(order.id)]
+);
+if (existingMLOrder[0]) {
+  console.log('Orden MELI ya procesada, ignorando:', order.id);
+  return;
+}
 
     const items = (order.order_items || []).map(i => ({
       item_id: i.item?.id,
