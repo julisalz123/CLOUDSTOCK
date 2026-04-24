@@ -37,7 +37,7 @@ console.log('Store ID detectado:', storeId);
     const eventType = event.event;
 
     // Venta pagada en TN
-    if (eventType === 'order/paid' || eventType === 'order/fulfilled') {
+    if (eventType === 'order/paid' || eventType === 'order/fulfilled' || eventType === 'order/created') {
       const order = event.data || event;
       if (!order.products) return;
 
