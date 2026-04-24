@@ -2,6 +2,7 @@ const axios = require('axios');
 const pool = require('../models/db');
 
 const ML_BASE = 'https://api.mercadolibre.com';
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Refresca el access token de MELI automáticamente
 async function refreshMLToken(userId) {
@@ -118,6 +119,7 @@ async function getSellerItems(userId) {
       chunks.push(data.results.slice(i, i + 20));
     }
     for (const chunk of chunks) {
+      await sleep(500);
       const ids = chunk.join(',');
       const { data: details } = await client.get(`/items?ids=${ids}&attributes=id,title,seller_custom_field,available_quantity,variations`);
       for (const item of details) {
