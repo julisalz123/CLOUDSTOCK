@@ -38,8 +38,34 @@ console.log('Store ID detectado:', storeId);
 
     // Venta pagada en TN
     if (eventType === 'order/paid' || eventType === 'order/fulfilled' || eventType === 'order/created') {
-      const order = event.data || event;
-      if (!order.products) return;
+  let order = event.data || event;
+  
+  // Si no trae productos, los busca en la API de TN
+  if (!order.products || order.products.length === 0) {
+    try {
+      const { rows: tnStoreRows } = await pool.query(
+        `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
+        [userId]
+      );
+      if (!tnStoreRows[0]) return;
+      const axios = require('axios');
+      const { data: fullOrder } = await axios.get(
+        `https://api.tiendanube.com/v1/${tnStoreRows[0].store_id}/orders/${order.id}`,
+        {
+          headers: {
+            'Authentication': `bearer ${tnStoreRows[0].access_token}`,
+            'User-Agent': 'SyncStock/1.0',
+          }
+        }
+      );
+      order = fullOrder;
+    } catch (err) {
+      console.error('Error trayendo orden TN:', err.message);
+      return;
+    }
+  }
+  
+  if (!order.products) return;
 
 // Verificar si esta orden ya fue procesada
 const { rows: existingTNOrder } = await pool.query(
