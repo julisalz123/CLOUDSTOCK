@@ -171,7 +171,49 @@ router.post('/mercadolibre', async (req, res) => {
 
     // Trae los detalles de la orden
     const order = await mlService.getOrder(userId, resourceId);
-    if (!order || order.status !== 'paid') return;
+if (!order) return;
+
+if (order.status === 'cancelled') {
+  const { rows: cancelledOrder } = await pool.query(
+    `SELECT id, items FROM orders WHERE platform_order_id = $1 AND platform = 'mercadolibre'`,
+    [String(order.id)]
+  );
+  if (!cancelledOrder[0]) return;
+
+  const { rows: tnRows } = await pool.query(
+    `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`, [userId]
+  );
+  if (!tnRows[0]) return;
+
+  const tnService = require('../services/tiendanube');
+  const items = JSON.parse(cancelledOrder[0].items || '[]');
+  for (const item of items) {
+    try {
+      const { rows: mappings } = await pool.query(
+        `SELECT * FROM product_mappings WHERE user_id = $1 AND ml_item_id = $2 AND is_active = true`,
+        [userId, String(item.item_id)]
+      );
+      if (!mappings[0]) continue;
+      const mapping = mappings[0];
+      const newStock = (mapping.current_stock || 0) + item.quantity;
+      await tnService.updateVariantStock(
+        tnRows[0].store_id, tnRows[0].access_token,
+        mapping.tn_product_id, mapping.tn_variant_id, newStock
+      );
+      await pool.query(
+        `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
+        [newStock, mapping.id]
+      );
+      await pool.query(`UPDATE orders SET status = 'cancelled' WHERE id = $1`, [cancelledOrder[0].id]);
+      console.log(`Cancelación MELI: +${item.quantity} en TN para ${mapping.sku}`);
+    } catch (err) {
+      console.error('Error cancelación MELI:', err.message);
+    }
+  }
+  return;
+}
+
+if (order.status !== 'paid') return;
 
 const { rows: existingMLOrder } = await pool.query(
   `SELECT id FROM orders WHERE platform_order_id = $1 AND platform = 'mercadolibre'`,
