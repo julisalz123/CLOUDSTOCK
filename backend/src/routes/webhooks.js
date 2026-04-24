@@ -90,7 +90,8 @@ if (existingTNOrder[0]) {
       await pool.query(
         `INSERT INTO orders (user_id, platform, platform_order_id, status, customer_name, customer_email, total_amount, items, raw_data)
          VALUES ($1, 'tiendanube', $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT DO NOTHING`,
+         ON CONFLICT (platform, platform_order_id) 
+DO UPDATE SET status = EXCLUDED.status`,
         [
           userId,
           String(order.id),
