@@ -54,7 +54,13 @@ async function initialSync(userId) {
   );
 } catch (err) {
   if (err.response?.status === 400) {
-    await mlService.updateStock(userId, mapping.ml_item_id, tnStock, null);
+    console.error('400 MELI:', JSON.stringify(err.response?.data));
+    try {
+      await mlService.updateStock(userId, mapping.ml_item_id, tnStock, null);
+    } catch (err2) {
+      console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
+      throw err2;
+    }
   } else {
     throw err;
   }
@@ -124,7 +130,13 @@ async function handleTNSale(userId, orderId, orderItems) {
   );
 } catch (err) {
   if (err.response?.status === 400) {
-    await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+    console.error('400 MELI:', JSON.stringify(err.response?.data));
+    try {
+      await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+    } catch (err2) {
+      console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
+      throw err2;
+    }
   } else {
     throw err;
   }
@@ -238,7 +250,13 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
   );
 } catch (err) {
   if (err.response?.status === 400) {
-    await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+    console.error('400 MELI:', JSON.stringify(err.response?.data));
+    try {
+      await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+    } catch (err2) {
+      console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
+      throw err2;
+    }
   } else {
     throw err;
   }
