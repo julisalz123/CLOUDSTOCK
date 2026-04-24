@@ -54,9 +54,16 @@ async function initialSync(userId) {
   );
 } catch (err) {
   if (err.response?.status === 400) {
-    console.error('400 MELI:', JSON.stringify(err.response?.data));
+    const errData = err.response?.data;
+    // Si el ítem está cerrado, ignorar silenciosamente
+    if (errData?.error === 'validation_error' && 
+        errData?.message?.includes('closed')) {
+      console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+      return;
+    }
+    console.error('400 MELI:', JSON.stringify(errData));
     try {
-      await mlService.updateStock(userId, mapping.ml_item_id, tnStock, null);
+      await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
     } catch (err2) {
       console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
       throw err2;
@@ -130,7 +137,14 @@ async function handleTNSale(userId, orderId, orderItems) {
   );
 } catch (err) {
   if (err.response?.status === 400) {
-    console.error('400 MELI:', JSON.stringify(err.response?.data));
+    const errData = err.response?.data;
+    // Si el ítem está cerrado, ignorar silenciosamente
+    if (errData?.error === 'validation_error' && 
+        errData?.message?.includes('closed')) {
+      console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+      return;
+    }
+    console.error('400 MELI:', JSON.stringify(errData));
     try {
       await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
     } catch (err2) {
@@ -250,7 +264,14 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
   );
 } catch (err) {
   if (err.response?.status === 400) {
-    console.error('400 MELI:', JSON.stringify(err.response?.data));
+    const errData = err.response?.data;
+    // Si el ítem está cerrado, ignorar silenciosamente
+    if (errData?.error === 'validation_error' && 
+        errData?.message?.includes('closed')) {
+      console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+      return;
+    }
+    console.error('400 MELI:', JSON.stringify(errData));
     try {
       await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
     } catch (err2) {
