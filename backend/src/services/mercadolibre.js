@@ -208,7 +208,7 @@ function getOAuthUrl(redirectUri) {
     client_id: process.env.ML_CLIENT_ID,
     redirect_uri: redirectUri,
   });
-  return `https://auth.mercadolibre.com.ar/authorization?${params}`;
+  return `https://auth.mercadolibre.com.ar/authorization?${params}&scope=read_orders%20write_orders%20read_listings%20write_listings%20offline_access`;
 }
 
 // Intercambia el código de OAuth por tokens
