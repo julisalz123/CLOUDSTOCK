@@ -34,6 +34,71 @@ router.get('/mercadolibre', auth, async (req, res) => {
   }
 });
 
+// Auto-mapeo por SKU — sugiere matches sin guardar nada
+router.get('/automatch', auth, async (req, res) => {
+  try {
+    const { rows: storeRows } = await pool.query(
+      `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
+      [req.userId]
+    );
+    if (!storeRows[0]) return res.status(400).json({ error: 'Tiendanube no conectada' });
+
+    const [tnProducts, mlItems] = await Promise.all([
+      tnService.getAllProducts(storeRows[0].store_id, storeRows[0].access_token).then(p => tnService.parseProducts(p)),
+      mlService.getSellerItems(req.userId),
+    ]);
+
+    const { rows: existingMappings } = await pool.query(
+      `SELECT sku FROM product_mappings WHERE user_id = $1 AND is_active = true`,
+      [req.userId]
+    );
+    const existingSkus = new Set(existingMappings.map(m => m.sku));
+
+    const mlBySku = {};
+    for (const item of mlItems) {
+      if (item.sku) {
+        const skuKey = item.sku.trim().toLowerCase();
+        if (!mlBySku[skuKey]) mlBySku[skuKey] = [];
+        mlBySku[skuKey].push(item);
+      }
+    }
+
+    const matches = [];
+    for (const tnProduct of tnProducts) {
+      if (!tnProduct.sku) continue;
+      const skuKey = tnProduct.sku.trim().toLowerCase();
+      if (existingSkus.has(tnProduct.sku)) continue;
+      const mlMatches = mlBySku[skuKey];
+      if (!mlMatches) continue;
+
+      for (const mlItem of mlMatches) {
+        matches.push({
+          sku: tnProduct.sku,
+          tn: {
+            productId: tnProduct.productId,
+            variantId: tnProduct.variantId,
+            productName: tnProduct.productName,
+            stock: tnProduct.stock,
+            values: tnProduct.values,
+          },
+          ml: {
+            itemId: mlItem.id,
+            title: mlItem.title,
+            stock: mlItem.stock,
+            variations: mlItem.variations,
+          },
+          confidence: 'exact',
+        });
+      }
+    }
+
+    res.json({ matches, total: matches.length });
+  } catch (err) {
+    console.error('Error en automatch:', err);
+    res.status(500).json({ error: 'Error al buscar matches automáticos' });
+  }
+});
+
 // Lista los mapeos activos del usuario
 router.get('/mappings', auth, async (req, res) => {
   try {
@@ -51,7 +116,7 @@ router.get('/mappings', auth, async (req, res) => {
   }
 });
 
-// Crea un mapeo SKU (conecta un producto TN con uno MELI)
+// Crea un mapeo SKU
 router.post('/mappings', auth, async (req, res) => {
   try {
     const {
@@ -61,7 +126,7 @@ router.post('/mappings', auth, async (req, res) => {
     } = req.body;
 
     if (!sku || !tnProductId || !tnVariantId || !mlItemId) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios (sku, tnProductId, tnVariantId, mlItemId)' });
+      return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
 
     const mapping = await syncEngine.createMapping(req.userId, {
@@ -89,7 +154,7 @@ router.delete('/mappings/:id', auth, async (req, res) => {
   }
 });
 
-// Sincronización inicial: vuelca el stock de TN a MELI
+// Sincronización inicial
 router.post('/sync/initial', auth, async (req, res) => {
   try {
     const results = await syncEngine.initialSync(req.userId);
@@ -100,7 +165,7 @@ router.post('/sync/initial', auth, async (req, res) => {
   }
 });
 
-// Sync manual de un producto específico
+// Sync manual de un producto
 router.post('/sync/:mappingId', auth, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -132,7 +197,7 @@ router.post('/sync/:mappingId', auth, async (req, res) => {
   }
 });
 
-// Historial de sync de un producto
+// Historial de sync
 router.get('/mappings/:id/logs', auth, async (req, res) => {
   try {
     const { rows } = await pool.query(
