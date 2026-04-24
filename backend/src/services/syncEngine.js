@@ -59,6 +59,7 @@ async function initialSync(userId) {
     if (errData?.error === 'validation_error' && 
         errData?.message?.includes('closed')) {
       console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+results.errors.push({ mappingId: mapping.id, sku: mapping.sku, error: 'item_closed' });
       return;
     }
     console.error('400 MELI:', JSON.stringify(errData));
