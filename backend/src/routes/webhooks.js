@@ -69,20 +69,41 @@ console.log('Store ID detectado:', storeId);
 
     // Cambio manual de stock en TN (restock u otro cambio)
     if (eventType === 'product/updated') {
-      const product = event.data || event;
-      if (!product.id || !product.variants) return;
+  const product = event.data || event;
+  const productId = product.id || event.id;
+  if (!productId) return;
 
-      for (const variant of product.variants) {
-        if (variant.stock !== undefined) {
-          await syncEngine.handleTNStockUpdate(
-            userId,
-            String(product.id),
-            String(variant.id),
-            variant.stock
-          );
-        }
+  // TN no manda el stock en el webhook, hay que pedirlo a la API
+  const { rows: storeRows2 } = await pool.query(
+    `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
+    [userId]
+  );
+  if (!storeRows2[0]) return;
+
+  try {
+    const tnService = require('../services/tiendanube');
+    const fullProduct = await tnService.getProduct(
+      storeRows2[0].store_id,
+      storeRows2[0].access_token,
+      String(productId)
+    );
+    if (!fullProduct?.variants) return;
+
+    for (const variant of fullProduct.variants) {
+      if (variant.stock !== undefined && variant.stock !== null) {
+        console.log(`Actualizando variante ${variant.id} stock: ${variant.stock}`);
+        await syncEngine.handleTNStockUpdate(
+          userId,
+          String(productId),
+          String(variant.id),
+          variant.stock
+        );
       }
     }
+  } catch (err) {
+    console.error('Error trayendo producto TN en webhook:', err.message);
+  }
+}
 
   } catch (err) {
     console.error('Error procesando webhook TN:', err);
