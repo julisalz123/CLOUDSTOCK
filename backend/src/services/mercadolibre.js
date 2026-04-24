@@ -12,12 +12,14 @@ async function refreshMLToken(userId) {
   );
   if (!rows[0]) throw new Error('No hay tokens de MELI para este usuario');
 
-  const { data } = await axios.post(`${ML_BASE}/oauth/token`, {
+  const { data } = await axios.post(`${ML_BASE}/oauth/token`, null, {
+  params: {
     grant_type: 'refresh_token',
     client_id: process.env.ML_CLIENT_ID,
     client_secret: process.env.ML_CLIENT_SECRET,
     refresh_token: rows[0].refresh_token,
-  });
+  }
+});
 
   const expiresAt = new Date(Date.now() + data.expires_in * 1000);
   await pool.query(
