@@ -59,6 +59,7 @@ console.log('Store ID detectado:', storeId);
         }
       );
       order = fullOrder;
+      console.log('Orden TN completa:', JSON.stringify(order).substring(0, 500));
     } catch (err) {
       console.error('Error trayendo orden TN:', err.message);
       return;
