@@ -122,20 +122,50 @@ async function getSellerItems(userId) {
       const { data: details } = await client.get(`/items?ids=${ids}&attributes=id,title,seller_custom_field,available_quantity,variations`);
       for (const item of details) {
         if (item.code === 200 && item.body) {
-          // SKU: primero seller_custom_field, si no busca en variaciones
           let sku = item.body.seller_custom_field || null;
-          if (!sku && item.body.variations?.length > 0) {
-            sku = item.body.variations[0].seller_custom_field || null;
+          let variations = [];
+
+          // Si tiene variaciones, traerlas con detalle
+          if (item.body.variations?.length > 0) {
+            try {
+              const { data: fullItem } = await client.get(
+                `/items/${item.body.id}?attributes=variations`
+              );
+              variations = (fullItem.variations || []).map(v => {
+                // SKU en seller_custom_field o en attributes con id SELLER_SKU
+                const varSku = v.seller_custom_field ||
+                  v.attributes?.find(a => a.id === 'SELLER_SKU')?.value_name ||
+                  null;
+                if (!sku && varSku) sku = varSku;
+                return {
+                  id: v.id,
+                  available_quantity: v.available_quantity,
+                  seller_custom_field: varSku,
+                  sku: varSku,
+                  attribute_combinations: v.attribute_combinations,
+                };
+              });
+            } catch (e) {
+              console.log('Error trayendo variaciones de', item.body.id, e.message);
+            }
           }
+
+          // Si no tiene variaciones, busca SKU en attributes
+          if (!sku) {
+            try {
+              const { data: fullItem } = await client.get(
+                `/items/${item.body.id}?attributes=attributes`
+              );
+              sku = fullItem.attributes?.find(a => a.id === 'SELLER_SKU')?.value_name || null;
+            } catch (e) {}
+          }
+
           items.push({
             id: item.body.id,
             title: item.body.title,
-            sku: sku,
+            sku,
             stock: item.body.available_quantity,
-            variations: item.body.variations?.map(v => ({
-              ...v,
-              sku: v.seller_custom_field || null,
-            })),
+            variations,
           });
         }
       }
