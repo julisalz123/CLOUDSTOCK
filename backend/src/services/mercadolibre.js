@@ -122,12 +122,20 @@ async function getSellerItems(userId) {
       const { data: details } = await client.get(`/items?ids=${ids}&attributes=id,title,seller_custom_field,available_quantity,variations`);
       for (const item of details) {
         if (item.code === 200 && item.body) {
+          // SKU: primero seller_custom_field, si no busca en variaciones
+          let sku = item.body.seller_custom_field || null;
+          if (!sku && item.body.variations?.length > 0) {
+            sku = item.body.variations[0].seller_custom_field || null;
+          }
           items.push({
             id: item.body.id,
             title: item.body.title,
-            sku: item.body.seller_custom_field,
+            sku: sku,
             stock: item.body.available_quantity,
-            variations: item.body.variations,
+            variations: item.body.variations?.map(v => ({
+              ...v,
+              sku: v.seller_custom_field || null,
+            })),
           });
         }
       }
