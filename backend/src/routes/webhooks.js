@@ -15,7 +15,16 @@ router.post('/tiendanube', async (req, res) => {
     const event = req.body;
     if (!event) return;
 
-    const storeId = String(req.headers['x-linkedstore'] || req.body.store_id || '');
+    console.log('Webhook TN headers:', JSON.stringify(req.headers));
+console.log('Webhook TN body:', JSON.stringify(req.body));
+const storeId = String(
+  req.headers['x-linkedstore'] || 
+  req.headers['x-store-id'] ||
+  req.body.store_id || 
+  req.body.store?.id ||
+  ''
+);
+console.log('Store ID detectado:', storeId);
 
     // Busca el usuario dueño de esta tienda
     const { rows: storeRows } = await pool.query(
