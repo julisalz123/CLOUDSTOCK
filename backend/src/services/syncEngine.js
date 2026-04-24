@@ -45,12 +45,20 @@ async function initialSync(userId) {
       );
 
       // 2. Actualiza MELI con el stock de TN (borrando el ficticio)
-      await mlService.updateStock(
-        userId,
-        mapping.ml_item_id,
-        tnStock,
-        mapping.ml_variation_id || null
-      );
+      try {
+  await mlService.updateStock(
+    userId,
+    mapping.ml_item_id,
+    tnStock,
+    mapping.ml_variation_id || null
+  );
+} catch (err) {
+  if (err.response?.status === 400) {
+    await mlService.updateStock(userId, mapping.ml_item_id, tnStock, null);
+  } else {
+    throw err;
+  }
+}
 
       // 3. Actualiza nuestro registro interno
       await pool.query(
@@ -107,12 +115,20 @@ async function handleTNSale(userId, orderId, orderItems) {
       setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
       // Actualiza MELI
-      await mlService.updateStock(
-        userId,
-        mapping.ml_item_id,
-        newStock,
-        mapping.ml_variation_id || null
-      );
+      try {
+  await mlService.updateStock(
+    userId,
+    mapping.ml_item_id,
+    newStock,
+    mapping.ml_variation_id || null
+  );
+} catch (err) {
+  if (err.response?.status === 400) {
+    await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+  } else {
+    throw err;
+  }
+}
 
       // Actualiza nuestro registro
       await pool.query(
@@ -213,12 +229,20 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
     pendingMLUpdates.add(updateKey);
     setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
-    await mlService.updateStock(
-      userId,
-      mapping.ml_item_id,
-      newStock,
-      mapping.ml_variation_id || null
-    );
+    try {
+  await mlService.updateStock(
+    userId,
+    mapping.ml_item_id,
+    newStock,
+    mapping.ml_variation_id || null
+  );
+} catch (err) {
+  if (err.response?.status === 400) {
+    await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+  } else {
+    throw err;
+  }
+}
 
     await pool.query(
       `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
