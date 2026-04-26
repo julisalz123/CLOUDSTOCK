@@ -54,6 +54,21 @@ app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date() }));
 // INICIO
 // ============================================================
 const PORT = process.env.PORT || 3001;
+// Refresca el token de MELI cada 4 horas automáticamente
+const { Pool } = require('pg');
+const mlService = require('./services/mercadolibre');
+setInterval(async () => {
+  try {
+    const db = require('./models/db');
+    const { rows } = await db.query('SELECT user_id FROM ml_tokens');
+    for (const row of rows) {
+      await mlService.refreshMLToken(row.user_id);
+      console.log(`Token MELI refrescado automáticamente para user ${row.user_id}`);
+    }
+  } catch (err) {
+    console.error('Error en refresh automático de MELI:', err.message);
+  }
+}, 4 * 60 * 60 * 1000); // cada 4 horas
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 SyncStock backend corriendo en puerto ${PORT}`);
   console.log(`📦 Entorno: ${process.env.NODE_ENV || 'development'}`);
