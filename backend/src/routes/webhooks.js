@@ -87,23 +87,26 @@ if (existingTNOrder[0]) {
       await syncEngine.handleTNSale(userId, String(order.id || ''), items);
 
       // Guarda la orden en nuestro sistema
-      await pool.query(
-        `INSERT INTO orders (user_id, platform, platform_order_id, status, customer_name, customer_email, total_amount, items, raw_data)
-         VALUES ($1, 'tiendanube', $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (platform, platform_order_id) 
-DO UPDATE SET status = EXCLUDED.status`,
-        [
-          userId,
-          String(order.id),
-          order.status || 'paid',
-          `${order.billing_name || ''} ${order.billing_last_name || ''}`.trim(),
-          order.billing_email || '',
-          order.price ? parseFloat(order.price) : null,
-          JSON.stringify(items),
-          JSON.stringify(order),
-        ]
-      );
-    }
+      try {
+  await pool.query(
+    `INSERT INTO orders (user_id, platform, platform_order_id, status, customer_name, customer_email, total_amount, items, raw_data)
+     VALUES ($1, 'tiendanube', $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (platform, platform_order_id) 
+     DO UPDATE SET status = EXCLUDED.status, items = EXCLUDED.items, raw_data = EXCLUDED.raw_data`,
+    [
+      userId,
+      String(order.id),
+      order.status || 'open',
+      `${order.billing_name || ''} ${order.billing_last_name || ''}`.trim(),
+      order.billing_email || '',
+      order.price ? parseFloat(order.price) : null,
+      JSON.stringify(items),
+      JSON.stringify(order),
+    ]
+  );
+} catch (dbErr) {
+  console.error('Error guardando orden TN en DB:', dbErr.message);
+}
 
     // Cambio manual de stock en TN (restock u otro cambio)
     if (eventType === 'product/updated') {
