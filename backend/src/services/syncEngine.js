@@ -18,7 +18,6 @@ const mlService = require('./mercadolibre');
 const pendingMLUpdates = new Set();
 
 // Sincronización inicial: trae stock de TN y lo vuelca en MELI
-// Borra el stock ficticio de MELI y pone el real de TN
 async function initialSync(userId) {
   const { rows: mappings } = await pool.query(
     `SELECT * FROM product_mappings WHERE user_id = $1 AND is_active = true`,
@@ -36,7 +35,6 @@ async function initialSync(userId) {
 
   for (const mapping of mappings) {
     try {
-      // 1. Lee el stock REAL de TN
       const tnStock = await tnService.getVariantStock(
         tnStore.store_id,
         tnStore.access_token,
@@ -44,45 +42,38 @@ async function initialSync(userId) {
         mapping.tn_variant_id
       );
 
-      // 2. Actualiza MELI con el stock de TN (borrando el ficticio)
       try {
-  await mlService.updateStock(
-    userId,
-    mapping.ml_item_id,
-    tnStock,
-    mapping.ml_variation_id || null
-  );
-} catch (err) {
-  if (err.response?.status === 400) {
-    const errData = err.response?.data;
-    // Si el ítem está cerrado, ignorar silenciosamente
-    if (errData?.error === 'validation_error' && 
-        errData?.message?.includes('closed')) {
-      console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
-results.errors.push({ mappingId: mapping.id, sku: mapping.sku, error: 'item_closed' });
-      return;
-    }
-    console.error('400 MELI:', JSON.stringify(errData));
-    try {
-      await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
-    } catch (err2) {
-      console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
-      throw err2;
-    }
-  } else {
-    throw err;
-  }
-}
+        await mlService.updateStock(
+          userId,
+          mapping.ml_item_id,
+          tnStock,
+          mapping.ml_variation_id || null
+        );
+      } catch (err) {
+        if (err.response?.status === 400) {
+          const errData = err.response?.data;
+          if (errData?.error === 'validation_error' && errData?.message?.includes('closed')) {
+            console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+            results.errors.push({ mappingId: mapping.id, sku: mapping.sku, error: 'item_closed' });
+            continue;
+          }
+          console.error('400 MELI:', JSON.stringify(errData));
+          try {
+            await mlService.updateStock(userId, mapping.ml_item_id, tnStock, null);
+          } catch (err2) {
+            console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
+            throw err2;
+          }
+        } else {
+          throw err;
+        }
+      }
 
-      // 3. Actualiza nuestro registro interno
       await pool.query(
-        `UPDATE product_mappings 
-         SET current_stock = $1, last_synced_at = NOW()
-         WHERE id = $2`,
+        `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
         [tnStock, mapping.id]
       );
 
-      // 4. Registra en el log
       await logSync({
         userId,
         mappingId: mapping.id,
@@ -104,11 +95,9 @@ results.errors.push({ mappingId: mapping.id, sku: mapping.sku, error: 'item_clos
 }
 
 // Procesa una venta en TIENDANUBE
-// → busca si hay mapeo → resta en TN (ya lo hizo TN) → actualiza MELI
 async function handleTNSale(userId, orderId, orderItems) {
   for (const item of orderItems) {
     try {
-      // Busca el mapeo por product_id/variant_id de TN
       const { rows } = await pool.query(
         `SELECT * FROM product_mappings 
          WHERE user_id = $1 
@@ -117,47 +106,42 @@ async function handleTNSale(userId, orderId, orderItems) {
          AND is_active = true`,
         [userId, String(item.product_id), String(item.variant_id)]
       );
-      if (!rows[0]) continue; // Este producto no está sincronizado
+      if (!rows[0]) continue;
 
       const mapping = rows[0];
       const previousStock = mapping.current_stock;
       const newStock = Math.max(0, previousStock - item.quantity);
 
-      // Marca el update como "nuestro" para ignorar el webhook de MELI
       const updateKey = `${mapping.ml_item_id}_${newStock}`;
       pendingMLUpdates.add(updateKey);
       setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
-      // Actualiza MELI
       try {
-  await mlService.updateStock(
-    userId,
-    mapping.ml_item_id,
-    newStock,
-    mapping.ml_variation_id || null
-  );
-} catch (err) {
-  if (err.response?.status === 400) {
-    const errData = err.response?.data;
-    // Si el ítem está cerrado, ignorar silenciosamente
-    if (errData?.error === 'validation_error' && 
-        errData?.message?.includes('closed')) {
-      console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
-      return;
-    }
-    console.error('400 MELI:', JSON.stringify(errData));
-    try {
-      await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
-    } catch (err2) {
-      console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
-      throw err2;
-    }
-  } else {
-    throw err;
-  }
-}
+        await mlService.updateStock(
+          userId,
+          mapping.ml_item_id,
+          newStock,
+          mapping.ml_variation_id || null
+        );
+      } catch (err) {
+        if (err.response?.status === 400) {
+          const errData = err.response?.data;
+          if (errData?.error === 'validation_error' && errData?.message?.includes('closed')) {
+            console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+            continue;
+          }
+          console.error('400 MELI:', JSON.stringify(errData));
+          try {
+            await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+          } catch (err2) {
+            console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
+            throw err2;
+          }
+        } else {
+          throw err;
+        }
+      }
 
-      // Actualiza nuestro registro
       await pool.query(
         `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
         [newStock, mapping.id]
@@ -181,7 +165,7 @@ async function handleTNSale(userId, orderId, orderItems) {
 }
 
 // Procesa una venta en MERCADO LIBRE
-// → busca mapeo → resta en TN → MELI ya lo descontó solo → actualiza nuestro registro
+// FIX: busca por ml_variation_id cuando existe, para productos con variantes
 async function handleMLSale(userId, orderId, mlItems) {
   const { rows: storeRows } = await pool.query(
     `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
@@ -192,18 +176,43 @@ async function handleMLSale(userId, orderId, mlItems) {
 
   for (const item of mlItems) {
     try {
-      const { rows } = await pool.query(
-        `SELECT * FROM product_mappings 
-         WHERE user_id = $1 
-         AND ml_item_id = $2 
-         AND is_active = true`,
-        [userId, String(item.item_id)]
-      );
-      if (!rows[0]) continue;
+      let rows;
+
+      // Si la venta trae variation_id, buscar el mapeo exacto por variante
+      if (item.variation_id) {
+        ({ rows } = await pool.query(
+          `SELECT * FROM product_mappings 
+           WHERE user_id = $1 
+           AND ml_item_id = $2 
+           AND ml_variation_id = $3
+           AND is_active = true
+           LIMIT 1`,
+          [userId, String(item.item_id), String(item.variation_id)]
+        ));
+      }
+
+      // Si no encontró por variante (o no había variation_id), buscar solo por item_id
+      if (!rows || rows.length === 0) {
+        ({ rows } = await pool.query(
+          `SELECT * FROM product_mappings 
+           WHERE user_id = $1 
+           AND ml_item_id = $2 
+           AND is_active = true
+           LIMIT 1`,
+          [userId, String(item.item_id)]
+        ));
+      }
+
+      if (!rows[0]) {
+        console.log(`Sin mapeo para MELI item ${item.item_id} variation ${item.variation_id}`);
+        continue;
+      }
 
       const mapping = rows[0];
       const previousStock = mapping.current_stock;
       const newStock = Math.max(0, previousStock - item.quantity);
+
+      console.log(`Venta MELI: item ${item.item_id} var ${item.variation_id} → TN producto ${mapping.tn_product_id} variante ${mapping.tn_variant_id} | stock ${previousStock} → ${newStock}`);
 
       // Resta en TN (el stock real)
       await tnService.updateVariantStock(
@@ -238,7 +247,6 @@ async function handleMLSale(userId, orderId, mlItems) {
 }
 
 // Procesa un cambio de stock en TN (restock manual o cambio de producto)
-// → actualiza MELI con el nuevo valor de TN
 async function handleTNStockUpdate(userId, productId, variantId, newStock) {
   try {
     const { rows } = await pool.query(
@@ -246,43 +254,40 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
        WHERE user_id = $1 AND tn_product_id = $2 AND tn_variant_id = $3 AND is_active = true`,
       [userId, String(productId), String(variantId)]
     );
-    if (!rows[0]) return; // No está sincronizado
+    if (!rows[0]) return;
 
     const mapping = rows[0];
     const previousStock = mapping.current_stock;
 
-    // Actualiza MELI con el nuevo stock de TN
     const updateKey = `${mapping.ml_item_id}_${newStock}`;
     pendingMLUpdates.add(updateKey);
     setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
     try {
-  await mlService.updateStock(
-    userId,
-    mapping.ml_item_id,
-    newStock,
-    mapping.ml_variation_id || null
-  );
-} catch (err) {
-  if (err.response?.status === 400) {
-    const errData = err.response?.data;
-    // Si el ítem está cerrado, ignorar silenciosamente
-    if (errData?.error === 'validation_error' && 
-        errData?.message?.includes('closed')) {
-      console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
-      return;
+      await mlService.updateStock(
+        userId,
+        mapping.ml_item_id,
+        newStock,
+        mapping.ml_variation_id || null
+      );
+    } catch (err) {
+      if (err.response?.status === 400) {
+        const errData = err.response?.data;
+        if (errData?.error === 'validation_error' && errData?.message?.includes('closed')) {
+          console.log(`Ítem MELI cerrado, ignorando: ${mapping.ml_item_id}`);
+          return;
+        }
+        console.error('400 MELI:', JSON.stringify(errData));
+        try {
+          await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
+        } catch (err2) {
+          console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
+          throw err2;
+        }
+      } else {
+        throw err;
+      }
     }
-    console.error('400 MELI:', JSON.stringify(errData));
-    try {
-      await mlService.updateStock(userId, mapping.ml_item_id, newStock, null);
-    } catch (err2) {
-      console.error('400 MELI fallback:', JSON.stringify(err2.response?.data));
-      throw err2;
-    }
-  } else {
-    throw err;
-  }
-}
 
     await pool.query(
       `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
