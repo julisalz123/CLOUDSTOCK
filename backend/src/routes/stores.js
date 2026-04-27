@@ -14,7 +14,7 @@ router.post('/tiendanube', auth, async (req, res) => {
     const { storeId, accessToken, storeName } = req.body;
     if (!storeId || !accessToken) return res.status(400).json({ error: 'Faltan datos de TN' });
 
-// Valida que los datos funcionan
+    // Valida que los datos funcionan
     try {
       await tnService.getAllProducts(storeId, accessToken);
     } catch (err) {
@@ -57,8 +57,6 @@ router.get('/mercadolibre/url', auth, (req, res) => {
 router.get('/mercadolibre/callback', async (req, res) => {
   try {
     const { code, state } = req.query;
-    // El userId viene en el state o lo buscamos por sesión
-    // Por simplicidad, el frontend redirige incluyendo el userId en el state
     const userId = state;
 
     if (!code) return res.status(400).send('Código de autorización requerido');
@@ -97,8 +95,20 @@ router.get('/mercadolibre/callback', async (req, res) => {
     // Redirige al frontend con éxito
     res.redirect(`${process.env.FRONTEND_URL || ''}/?ml=connected`);
   } catch (err) {
-    console.error('Error en OAuth MELI:', err);
+    console.error('Error en OAuth MELI:', err.response?.data || err.message);
     res.redirect(`${process.env.FRONTEND_URL || ''}/?ml=error`);
+  }
+});
+
+// FIX: Desconectar Mercado Libre
+router.delete('/mercadolibre', auth, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM ml_tokens WHERE user_id = $1`, [req.userId]);
+    await pool.query(`DELETE FROM stores WHERE user_id = $1 AND platform = 'mercadolibre'`, [req.userId]);
+    res.json({ ok: true, message: 'Mercado Libre desconectado exitosamente' });
+  } catch (err) {
+    console.error('Error desconectando MELI:', err);
+    res.status(500).json({ error: 'Error al desconectar Mercado Libre' });
   }
 });
 
