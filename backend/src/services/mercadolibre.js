@@ -219,18 +219,26 @@ function getOAuthUrl(redirectUri) {
 }
 
 // Intercambia el código de OAuth por tokens
+// FIX: debe usar URLSearchParams, no JSON
 async function exchangeCode(code, redirectUri) {
-  const { data } = await axios.post(`${ML_BASE}/oauth/token`, {
-    grant_type: 'authorization_code',
-    client_id: process.env.ML_CLIENT_ID,
-    client_secret: process.env.ML_CLIENT_SECRET,
-    code,
-    redirect_uri: redirectUri,
+  const params = new URLSearchParams();
+  params.append('grant_type', 'authorization_code');
+  params.append('client_id', process.env.ML_CLIENT_ID);
+  params.append('client_secret', process.env.ML_CLIENT_SECRET);
+  params.append('code', code);
+  params.append('redirect_uri', redirectUri);
+
+  const { data } = await axios.post(`${ML_BASE}/oauth/token`, params, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json',
+    }
   });
   return data;
 }
 
 module.exports = {
+  refreshMLToken,   // FIX: faltaba exportar esta función
   getValidToken,
   getItem,
   updateStock,
