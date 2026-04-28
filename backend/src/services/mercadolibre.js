@@ -12,13 +12,15 @@ async function refreshMLToken(userId) {
   );
   if (!rows[0]) throw new Error('No hay tokens de MELI para este usuario');
 
+  // FIX: validar que el refresh token existe antes de usarlo
+  if (!rows[0].refresh_token || rows[0].refresh_token === 'null') {
+    throw new Error('REAUTH_NEEDED');
+  }
+
   const params = new URLSearchParams();
   params.append('grant_type', 'refresh_token');
   params.append('client_id', process.env.ML_CLIENT_ID);
   params.append('client_secret', process.env.ML_CLIENT_SECRET);
-  if (!rows[0].refresh_token || rows[0].refresh_token === 'null') {
-    throw new Error('REAUTH_NEEDED');
-  }
   params.append('refresh_token', rows[0].refresh_token);
 
   const { data } = await axios.post(`${ML_BASE}/oauth/token`, params, {
@@ -39,7 +41,7 @@ async function refreshMLToken(userId) {
   return data.access_token;
 }
 
-// Obtiene un token válido, refrescando si es necesario
+// Obtiene un token valido, refrescando si es necesario
 async function getValidToken(userId) {
   const { rows } = await pool.query(
     'SELECT * FROM ml_tokens WHERE user_id = $1',
@@ -47,10 +49,19 @@ async function getValidToken(userId) {
   );
   if (!rows[0]) throw new Error('No hay tokens de MELI configurados');
 
-  const isExpired = new Date(rows[0].expires_at) < new Date(Date.now() + 5 * 60 * 1000);
-  if (isExpired) {
+  // FIX: expires_at viene como timestamp con timezone desde la DB.
+  // Comparamos correctamente: si ya paso o vence en menos de 5 min, refrescamos.
+  const expiresAt = rows[0].expires_at ? new Date(rows[0].expires_at) : null;
+  const now = new Date();
+  const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+
+  const needsRefresh = !expiresAt || expiresAt < fiveMinutesFromNow;
+
+  if (needsRefresh) {
+    console.log('Token MELI proximo a vencer o vencido, refrescando...');
     return await refreshMLToken(userId);
   }
+
   return rows[0].access_token;
 }
 
@@ -64,7 +75,7 @@ function mlClient(accessToken) {
   });
 }
 
-// Obtiene datos de un ítem de MELI
+// Obtiene datos de un item de MELI
 async function getItem(userId, itemId) {
   const token = await getValidToken(userId);
   const client = mlClient(token);
@@ -72,15 +83,13 @@ async function getItem(userId, itemId) {
   return data;
 }
 
-// Actualiza el stock de un ítem/variación en MELI
-// Esta es la función clave: sobreescribe el stock con el valor de TN
+// Actualiza el stock de un item/variacion en MELI
 async function updateStock(userId, itemId, newStock, variationId = null) {
   const token = await getValidToken(userId);
   const client = mlClient(token);
 
   let payload;
   if (variationId) {
-    // Producto con variaciones (talle, color, etc.)
     payload = {
       variations: [{ id: variationId, available_quantity: newStock }],
     };
@@ -92,7 +101,7 @@ async function updateStock(userId, itemId, newStock, variationId = null) {
   return data;
 }
 
-// Obtiene el stock actual de un ítem en MELI
+// Obtiene el stock actual de un item en MELI
 async function getItemStock(userId, itemId, variationId = null) {
   const item = await getItem(userId, itemId);
   if (variationId) {
@@ -102,14 +111,14 @@ async function getItemStock(userId, itemId, variationId = null) {
   return item.available_quantity ?? 0;
 }
 
-// Lista los ítems del vendedor en MELI
+// Lista los items del vendedor en MELI
 async function getSellerItems(userId) {
   const token = await getValidToken(userId);
   const { rows } = await pool.query(
     'SELECT ml_user_id FROM ml_tokens WHERE user_id = $1',
     [userId]
   );
-  if (!rows[0]?.ml_user_id) throw new Error('No se encontró el user_id de MELI');
+  if (!rows[0]?.ml_user_id) throw new Error('No se encontro el user_id de MELI');
 
   const client = mlClient(token);
   const items = [];
@@ -123,7 +132,6 @@ async function getSellerItems(userId) {
     total = data.paging?.total || 0;
     if (!data.results || data.results.length === 0) break;
 
-    // Trae detalles de hasta 20 ítems a la vez (límite de la API)
     const chunks = [];
     for (let i = 0; i < data.results.length; i += 20) {
       chunks.push(data.results.slice(i, i + 20));
@@ -137,14 +145,12 @@ async function getSellerItems(userId) {
           let sku = item.body.seller_custom_field || null;
           let variations = [];
 
-          // Si tiene variaciones, traerlas con detalle
           if (item.body.variations?.length > 0) {
             try {
               const { data: fullItem } = await client.get(
                 `/items/${item.body.id}?attributes=variations`
               );
               variations = (fullItem.variations || []).map(v => {
-                // SKU en seller_custom_field o en attributes con id SELLER_SKU
                 const varSku = v.seller_custom_field ||
                   v.attributes?.find(a => a.id === 'SELLER_SKU')?.value_name ||
                   null;
@@ -162,7 +168,6 @@ async function getSellerItems(userId) {
             }
           }
 
-          // Si no tiene variaciones, busca SKU en attributes
           if (!sku) {
             try {
               const { data: fullItem } = await client.get(
@@ -221,8 +226,7 @@ function getOAuthUrl(redirectUri) {
   return `https://auth.mercadolibre.com.ar/authorization?${params}&scope=read_orders%20write_orders%20read_listings%20write_listings%20offline_access`;
 }
 
-// Intercambia el código de OAuth por tokens
-// FIX: debe usar URLSearchParams, no JSON
+// Intercambia el codigo de OAuth por tokens
 async function exchangeCode(code, redirectUri) {
   const params = new URLSearchParams();
   params.append('grant_type', 'authorization_code');
@@ -241,7 +245,7 @@ async function exchangeCode(code, redirectUri) {
 }
 
 module.exports = {
-  refreshMLToken,   // FIX: faltaba exportar esta función
+  refreshMLToken,
   getValidToken,
   getItem,
   updateStock,
