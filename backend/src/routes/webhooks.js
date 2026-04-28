@@ -243,10 +243,13 @@ router.post('/mercadolibre', async (req, res) => {
     if (order.status !== 'paid') return;
 
     const items = (order.order_items || []).map(i => ({
-      item_id: i.item?.id,
-      variation_id: i.item?.variation_id || null,
-      quantity: i.quantity,
-    })).filter(i => i.item_id);
+  item_id: i.item?.id,
+  variation_id: i.item?.variation_id || null,
+  quantity: i.quantity,
+  product_name: i.item?.title || null,
+  unit_price: i.unit_price || null,
+  sku: i.item?.seller_custom_field || null,
+})).filter(i => i.item_id);
 
     if (items.length === 0) return;
 
