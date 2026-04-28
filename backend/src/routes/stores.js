@@ -63,7 +63,6 @@ router.get('/mercadolibre/callback', async (req, res) => {
 
     const redirectUri = `${process.env.PUBLIC_URL}/api/stores/mercadolibre/callback`;
     const tokens = await mlService.exchangeCode(code, redirectUri);
-    console.log('TOKENS DE MELI:', JSON.stringify(tokens))
     await pool.query(
       `INSERT INTO ml_tokens (user_id, access_token, refresh_token, expires_at, ml_user_id)
        VALUES ($1, $2, $3, $4, $5)
