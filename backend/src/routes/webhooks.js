@@ -177,16 +177,18 @@ router.post('/mercadolibre', async (req, res) => {
     if (!tokenRows[0]) return;
     const userId = tokenRows[0].user_id;
 
+    // FIX: si el refresh token es null, no explotar sino loguear y salir limpio
     let order;
     try {
       order = await mlService.getOrder(userId, resourceId);
     } catch (err) {
       if (err.message === 'REAUTH_NEEDED') {
-        console.error('Token MELI inválido para userId:', userId, '- necesita re-autenticarse');
+        console.error(`Token MELI invalido para userId ${userId}. El usuario debe reconectar su cuenta de MercadoLibre.`);
         return;
       }
       throw err;
     }
+
     if (!order) return;
 
     if (order.status === 'cancelled') {
@@ -221,9 +223,9 @@ router.post('/mercadolibre', async (req, res) => {
             [newStock, mapping.id]
           );
           await pool.query(`UPDATE orders SET status = 'cancelled' WHERE id = $1`, [cancelledOrder[0].id]);
-          console.log(`Cancelación MELI: +${item.quantity} en TN para ${mapping.sku}`);
+          console.log(`Cancelacion MELI: +${item.quantity} en TN para ${mapping.sku}`);
         } catch (err) {
-          console.error('Error cancelación MELI:', err.message);
+          console.error('Error cancelacion MELI:', err.message);
         }
       }
       return;
