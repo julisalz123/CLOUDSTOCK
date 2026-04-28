@@ -96,7 +96,7 @@ router.post('/tiendanube', async (req, res) => {
             order.status || 'open',
             `${order.billing_name || ''} ${order.billing_last_name || ''}`.trim(),
             order.billing_email || '',
-            order.price ? parseFloat(order.price) : null,
+            order.total || order.price ? parseFloat(order.total || order.price) : null,
             JSON.stringify(items),
             JSON.stringify(order),
           ]
