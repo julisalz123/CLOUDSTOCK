@@ -177,7 +177,16 @@ router.post('/mercadolibre', async (req, res) => {
     if (!tokenRows[0]) return;
     const userId = tokenRows[0].user_id;
 
-    const order = await mlService.getOrder(userId, resourceId);
+    let order;
+    try {
+      order = await mlService.getOrder(userId, resourceId);
+    } catch (err) {
+      if (err.message === 'REAUTH_NEEDED') {
+        console.error('Token MELI inválido para userId:', userId, '- necesita re-autenticarse');
+        return;
+      }
+      throw err;
+    }
     if (!order) return;
 
     if (order.status === 'cancelled') {
