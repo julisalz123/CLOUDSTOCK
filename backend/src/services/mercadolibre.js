@@ -16,6 +16,9 @@ async function refreshMLToken(userId) {
   params.append('grant_type', 'refresh_token');
   params.append('client_id', process.env.ML_CLIENT_ID);
   params.append('client_secret', process.env.ML_CLIENT_SECRET);
+  if (!rows[0].refresh_token || rows[0].refresh_token === 'null') {
+    throw new Error('REAUTH_NEEDED');
+  }
   params.append('refresh_token', rows[0].refresh_token);
 
   const { data } = await axios.post(`${ML_BASE}/oauth/token`, params, {
