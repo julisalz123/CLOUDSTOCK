@@ -175,35 +175,37 @@ router.post('/sync/:mappingId', auth, async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: 'Mapeo no encontrado' });
 
     const mapping = rows[0];
-
-    // Chequea si el item está en logística FULL antes de intentar tocar el stock
-    const isFull = await mlService.isFullItem(req.userId, mapping.ml_item_id);
-    if (isFull) {
-      return res.status(200).json({
-        ok: true,
-        skipped: true,
-        stock: mapping.current_stock,
-        reason: 'Item en logística FULL: MELI gestiona su propio stock, no se puede sincronizar vía API',
-      });
-    }
-
     const { rows: storeRows } = await pool.query(
       `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
       [req.userId]
     );
 
+    // 1. Siempre leemos el stock real de TN, sea Full o no
     const tnStock = await tnService.getVariantStock(
       storeRows[0].store_id, storeRows[0].access_token,
       mapping.tn_product_id, mapping.tn_variant_id
     );
 
-    await mlService.updateStock(req.userId, mapping.ml_item_id, tnStock, mapping.ml_variation_id);
+    // 2. Chequeamos si el item es FULL
+    const isFull = await mlService.isFullItem(req.userId, mapping.ml_item_id);
+
+    if (!isFull) {
+      // Solo si NO es Full, le pisamos el stock a MELI
+      await mlService.updateStock(req.userId, mapping.ml_item_id, tnStock, mapping.ml_variation_id);
+    }
+
+    // 3. En AMBOS casos actualizamos nuestro registro con el stock real de TN
     await pool.query(
       `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
       [tnStock, mapping.id]
     );
 
-    res.json({ ok: true, stock: tnStock });
+    res.json({
+      ok: true,
+      stock: tnStock,
+      skipped: isFull,
+      reason: isFull ? 'Item en logística FULL: no se pisó el stock en MELI (lo gestiona MELI), pero se actualizó tu registro con el stock real de TN' : undefined,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
