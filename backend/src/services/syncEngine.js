@@ -230,6 +230,22 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
     const mapping = rows[0];
     const previousStock = mapping.current_stock;
 
+    // Chequea si el item está en logística FULL
+    const isFull = await mlService.isFullItem(userId, mapping.ml_item_id);
+    if (isFull) {
+      await logSync({
+        userId,
+        mappingId: mapping.id,
+        eventType: 'sync_skipped_full',
+        sourcePlatform: 'tiendanube',
+        previousStock,
+        newStock: previousStock,
+        quantityChanged: 0,
+        details: { note: 'Item en logística FULL: MELI gestiona el stock, no se sincroniza vía API' },
+      });
+      return;
+    }
+
     // Actualiza MELI con el nuevo stock de TN
     const updateKey = `${mapping.ml_item_id}_${newStock}`;
     pendingMLUpdates.add(updateKey);
