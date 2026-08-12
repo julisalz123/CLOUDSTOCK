@@ -36,6 +36,25 @@ async function initialSync(userId) {
 
   for (const mapping of mappings) {
     try {
+      // 0. Chequea si el item está en logística FULL
+      const isFull = await mlService.isFullItem(userId, mapping.ml_item_id);
+
+      if (isFull) {
+        // MELI gestiona su propio stock para items en FULL. No podemos pisarlo.
+        await logSync({
+          userId,
+          mappingId: mapping.id,
+          eventType: 'sync_skipped_full',
+          sourcePlatform: 'mercadolibre',
+          previousStock: mapping.current_stock,
+          newStock: mapping.current_stock,
+          quantityChanged: null,
+          details: { note: 'Item en logística FULL: MELI gestiona el stock, no se sincroniza vía API' },
+        });
+        results.synced++;
+        continue;
+      }
+
       // 1. Lee el stock REAL de TN
       const tnStock = await tnService.getVariantStock(
         tnStore.store_id,
