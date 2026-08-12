@@ -224,6 +224,13 @@ async function getShipment(userId, shipmentId) {
   return data;
 }
 
+// Verifica si un item está en logística FULL
+// Si lo está, MELI maneja su propio stock y rechaza updates manuales (error 400)
+async function isFullItem(userId, itemId) {
+  const item = await getItem(userId, itemId);
+  return item?.shipping?.logistic_type === 'fulfillment';
+}
+
 // Genera la URL de OAuth para autenticar con MELI
 function getOAuthUrl(redirectUri) {
   const params = new URLSearchParams({
@@ -260,7 +267,8 @@ module.exports = {
   getSellerItems,
   registerWebhook,
   getOrder,
-  getShipment,      // ← esta línea es la nueva
+  getShipment,
+  isFullItem,        // ← nueva línea
   getOAuthUrl,
   exchangeCode,
 };
