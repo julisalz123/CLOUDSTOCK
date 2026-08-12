@@ -217,32 +217,22 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
 
     // Chequea si el item está en logística FULL
     const isFull = await mlService.isFullItem(userId, mapping.ml_item_id);
-    if (isFull) {
-      await logSync({
+
+    if (!isFull) {
+      // Solo si NO es Full, actualiza MELI con el nuevo stock de TN
+      const updateKey = `${mapping.ml_item_id}_${newStock}`;
+      pendingMLUpdates.add(updateKey);
+      setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
+
+      await mlService.updateStock(
         userId,
-        mappingId: mapping.id,
-        eventType: 'sync_skipped_full',
-        sourcePlatform: 'tiendanube',
-        previousStock,
-        newStock: previousStock,
-        quantityChanged: 0,
-        details: { note: 'Item en logística FULL: MELI gestiona el stock, no se sincroniza vía API' },
-      });
-      return;
+        mapping.ml_item_id,
+        newStock,
+        mapping.ml_variation_id || null
+      );
     }
 
-    // Actualiza MELI con el nuevo stock de TN
-    const updateKey = `${mapping.ml_item_id}_${newStock}`;
-    pendingMLUpdates.add(updateKey);
-    setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
-
-    await mlService.updateStock(
-      userId,
-      mapping.ml_item_id,
-      newStock,
-      mapping.ml_variation_id || null
-    );
-
+    // Esto se ejecuta SIEMPRE, sea Full o no: tu registro queda con el número real de TN
     await pool.query(
       `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
       [newStock, mapping.id]
@@ -251,11 +241,12 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
     await logSync({
       userId,
       mappingId: mapping.id,
-      eventType: 'manual_update_tn',
+      eventType: isFull ? 'sync_skipped_full' : 'manual_update_tn',
       sourcePlatform: 'tiendanube',
       previousStock,
       newStock,
       quantityChanged: newStock - previousStock,
+      details: isFull ? { note: 'Item en logística FULL: no se pisó MELI, solo se actualizó el registro interno' } : undefined,
     });
 
   } catch (err) {
