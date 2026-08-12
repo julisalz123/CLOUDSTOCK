@@ -175,6 +175,17 @@ router.post('/sync/:mappingId', auth, async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: 'Mapeo no encontrado' });
 
     const mapping = rows[0];
+
+    // Chequea si el item está en logística FULL antes de intentar tocar el stock
+    const isFull = await mlService.isFullItem(req.userId, mapping.ml_item_id);
+    if (isFull) {
+      return res.status(200).json({
+        ok: true,
+        skipped: true,
+        reason: 'Item en logística FULL: MELI gestiona su propio stock, no se puede sincronizar vía API',
+      });
+    }
+
     const { rows: storeRows } = await pool.query(
       `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
       [req.userId]
