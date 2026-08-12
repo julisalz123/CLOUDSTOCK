@@ -200,6 +200,18 @@ router.post('/sync/:mappingId', auth, async (req, res) => {
       [tnStock, mapping.id]
     );
 
+    // NUEVO: dejamos registro de qué pasó en este sync manual
+    await syncEngine.logSync({
+      userId: req.userId,
+      mappingId: mapping.id,
+      eventType: isFull ? 'sync_skipped_full' : 'manual_sync_button',
+      sourcePlatform: 'tiendanube',
+      previousStock: mapping.current_stock,
+      newStock: tnStock,
+      quantityChanged: tnStock - mapping.current_stock,
+      details: isFull ? { note: 'Item en logística FULL: no se pisó MELI' } : { note: 'Sync manual vía botón, se intentó actualizar MELI' },
+    });
+
     res.json({
       ok: true,
       stock: tnStock,
