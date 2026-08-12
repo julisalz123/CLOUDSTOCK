@@ -182,6 +182,7 @@ router.post('/sync/:mappingId', auth, async (req, res) => {
       return res.status(200).json({
         ok: true,
         skipped: true,
+        stock: mapping.current_stock,
         reason: 'Item en logística FULL: MELI gestiona su propio stock, no se puede sincronizar vía API',
       });
     }
