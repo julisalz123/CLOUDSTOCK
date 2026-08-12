@@ -216,6 +216,14 @@ async function getOrder(userId, orderId) {
   return data;
 }
 
+// Obtiene detalles de un envío de MELI (para saber si es FULL o no)
+async function getShipment(userId, shipmentId) {
+  const token = await getValidToken(userId);
+  const client = mlClient(token);
+  const { data } = await client.get(`/shipments/${shipmentId}`);
+  return data;
+}
+
 // Genera la URL de OAuth para autenticar con MELI
 function getOAuthUrl(redirectUri) {
   const params = new URLSearchParams({
@@ -252,6 +260,7 @@ module.exports = {
   getSellerItems,
   registerWebhook,
   getOrder,
+  getShipment,      // ← esta línea es la nueva
   getOAuthUrl,
   exchangeCode,
 };
