@@ -118,20 +118,20 @@ try {
 }
 
 const items = (order.order_items || []).map(i => ({
-  item_id: i.item?.id,
-  variation_id: i.item?.variation_id || null,
-  quantity: i.quantity,
-})).filter(i => i.item_id);
+      item_id: i.item?.id,
+      variation_id: i.item?.variation_id || null,
+      quantity: i.quantity,
+    })).filter(i => i.item_id);
 
-if (items.length === 0) return;
+    if (items.length === 0) return;
 
-await syncEngine.handleMLSale(userId, String(order.id), items, isFulfillment);
-
-    // Guarda la orden
-    await pool.query(
+    // Intenta guardar la orden PRIMERO, usando la constraint UNIQUE (platform, platform_order_id) como candado real.
+    // Si ya existía, no inserta nada y "rows" queda vacío: eso confirma que es una notificación duplicada.
+    const insertResult = await pool.query(
       `INSERT INTO orders (user_id, platform, platform_order_id, status, customer_name, customer_email, total_amount, items, raw_data)
        VALUES ($1, 'mercadolibre', $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT DO NOTHING`,
+       ON CONFLICT (platform, platform_order_id) DO NOTHING
+       RETURNING id`,
       [
         userId,
         String(order.id),
@@ -143,6 +143,14 @@ await syncEngine.handleMLSale(userId, String(order.id), items, isFulfillment);
         JSON.stringify(order),
       ]
     );
+
+    if (insertResult.rows.length === 0) {
+      console.log(`Orden ML ${order.id} ya procesada, se ignora notificación duplicada`);
+      return;
+    }
+
+    // Recién acá, porque confirmamos que es la PRIMERA vez que vemos esta orden, restamos stock
+    await syncEngine.handleMLSale(userId, String(order.id), items);
 
   } catch (err) {
     console.error('Error procesando webhook MELI:', err);
