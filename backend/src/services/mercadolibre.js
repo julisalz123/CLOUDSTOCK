@@ -90,25 +90,48 @@ async function updateStock(userId, itemId, newStock, variationId = null) {
 
   let payload;
   if (variationId) {
-    payload = {
-      variations: [{ id: variationId, available_quantity: newStock }],
-    };
+    payload = { variations: [{ id: variationId, available_quantity: newStock }] };
   } else {
     payload = { available_quantity: newStock };
   }
 
-  console.log(`[DEBUG updateStock] item=${itemId} variation=${variationId} payload=`, JSON.stringify(payload));
-
   try {
     const { data } = await client.put(`/items/${itemId}`, payload);
-    console.log(`[DEBUG updateStock] RESPUESTA OK item=${itemId}:`, JSON.stringify(data.available_quantity !== undefined ? { available_quantity: data.available_quantity } : data.variations || data));
     return data;
   } catch (err) {
-    console.log(`[DEBUG updateStock] ERROR item=${itemId} status=${err.response?.status} body=`, JSON.stringify(err.response?.data));
+    const code = err.response?.data?.cause?.[0]?.code;
+    if (err.response?.status === 400 && code === 'item.available_quantity.not_modifiable') {
+      // Es Full con convivencia: usamos el endpoint correcto de user-products
+      const item = await getItem(userId, itemId);
+      const userProductId = item?.user_product_id;
+      if (!userProductId) throw err;
+      return await updateSellingAddressStock(userId, userProductId, newStock);
+    }
     throw err;
   }
 }
 
+// Obtiene el user_product_id de un item (necesario para productos con convivencia Full/Flex)
+async function getUserProductId(userId, itemId) {
+  const item = await getItem(userId, itemId);
+  return item?.user_product_id || null;
+}
+
+// Actualiza el stock del Depósito propio (selling_address) para items con convivencia Full/Flex
+async function updateSellingAddressStock(userId, userProductId, newStock) {
+  const token = await getValidToken(userId);
+  const client = mlClient(token);
+
+  const getRes = await client.get(`/user-products/${userProductId}/stock`);
+  const xVersion = getRes.headers['x-version'];
+
+  const { data } = await client.put(
+    `/user-products/${userProductId}/stock/type/selling_address`,
+    { quantity: newStock },
+    { headers: { 'x-version': xVersion } }
+  );
+  return data;
+}
 // Obtiene el stock actual de un item en MELI
 async function getItemStock(userId, itemId, variationId = null) {
   const item = await getItem(userId, itemId);
@@ -276,7 +299,8 @@ module.exports = {
   registerWebhook,
   getOrder,
   getShipment,
-  isFullItem,        // ← nueva línea
+  getUserProductId,           
+  updateSellingAddressStock, 
   getOAuthUrl,
   exchangeCode,
 };
