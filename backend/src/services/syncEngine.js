@@ -219,21 +219,25 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
     const mapping = rows[0];
     const previousStock = mapping.current_stock;
 
-    // Chequea si el item está en logística FULL
-    const isFull = await mlService.isFullItem(userId, mapping.ml_item_id);
+// Intenta actualizar MELI directamente. Si rechaza con 400, es FULL puro.
+    let isFull = false;
+    const updateKey = `${mapping.ml_item_id}_${newStock}`;
+    pendingMLUpdates.add(updateKey);
+    setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
-    if (!isFull) {
-      // Solo si NO es Full, actualiza MELI con el nuevo stock de TN
-      const updateKey = `${mapping.ml_item_id}_${newStock}`;
-      pendingMLUpdates.add(updateKey);
-      setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
-
+    try {
       await mlService.updateStock(
         userId,
         mapping.ml_item_id,
         newStock,
         mapping.ml_variation_id || null
       );
+    } catch (err) {
+      if (err.response?.status === 400) {
+        isFull = true;
+      } else {
+        throw err;
+      }
     }
 
     // Esto se ejecuta SIEMPRE, sea Full o no: tu registro queda con el número real de TN
