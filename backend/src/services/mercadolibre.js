@@ -97,8 +97,16 @@ async function updateStock(userId, itemId, newStock, variationId = null) {
     payload = { available_quantity: newStock };
   }
 
-  const { data } = await client.put(`/items/${itemId}`, payload);
-  return data;
+  console.log(`[DEBUG updateStock] item=${itemId} variation=${variationId} payload=`, JSON.stringify(payload));
+
+  try {
+    const { data } = await client.put(`/items/${itemId}`, payload);
+    console.log(`[DEBUG updateStock] RESPUESTA OK item=${itemId}:`, JSON.stringify(data.available_quantity !== undefined ? { available_quantity: data.available_quantity } : data.variations || data));
+    return data;
+  } catch (err) {
+    console.log(`[DEBUG updateStock] ERROR item=${itemId} status=${err.response?.status} body=`, JSON.stringify(err.response?.data));
+    throw err;
+  }
 }
 
 // Obtiene el stock actual de un item en MELI
