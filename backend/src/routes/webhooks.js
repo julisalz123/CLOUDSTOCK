@@ -149,8 +149,8 @@ const items = (order.order_items || []).map(i => ({
       return;
     }
 
-    // Recién acá, porque confirmamos que es la PRIMERA vez que vemos esta orden, restamos stock
-    await syncEngine.handleMLSale(userId, String(order.id), items);
+// Recién acá, porque confirmamos que es la PRIMERA vez que vemos esta orden, restamos stock
+    await syncEngine.handleMLSale(userId, String(order.id), items, isFulfillment);
 
   } catch (err) {
     console.error('Error procesando webhook MELI:', err);
