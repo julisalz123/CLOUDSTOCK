@@ -180,18 +180,23 @@ router.post('/sync/:mappingId', auth, async (req, res) => {
       [req.userId]
     );
 
-    // 1. Siempre leemos el stock real de TN, sea Full o no
+// 1. Siempre leemos el stock real de TN, sea Full o no
     const tnStock = await tnService.getVariantStock(
       storeRows[0].store_id, storeRows[0].access_token,
       mapping.tn_product_id, mapping.tn_variant_id
     );
 
-    // 2. Chequeamos si el item es FULL
-    const isFull = await mlService.isFullItem(req.userId, mapping.ml_item_id);
-
-    if (!isFull) {
-      // Solo si NO es Full, le pisamos el stock a MELI
+    // 2. Intentamos actualizar MELI directamente. Si rechaza con 400, es porque
+    // ese item (o esa variación) es FULL puro, sin porción propia editable.
+    let isFull = false;
+    try {
       await mlService.updateStock(req.userId, mapping.ml_item_id, tnStock, mapping.ml_variation_id);
+    } catch (err) {
+      if (err.response?.status === 400) {
+        isFull = true;
+      } else {
+        throw err;
+      }
     }
 
     // 3. En AMBOS casos actualizamos nuestro registro con el stock real de TN
