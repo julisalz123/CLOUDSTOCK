@@ -44,17 +44,21 @@ async function initialSync(userId) {
         mapping.tn_variant_id
       );
 
-      // 2. Chequea si el item está en logística FULL
-      const isFull = await mlService.isFullItem(userId, mapping.ml_item_id);
-
-      if (!isFull) {
-        // Solo si NO es Full, pisamos el stock en MELI
+      // 2. Intenta actualizar MELI directamente. Si rechaza con 400, es FULL puro.
+      let isFull = false;
+      try {
         await mlService.updateStock(
           userId,
           mapping.ml_item_id,
           tnStock,
           mapping.ml_variation_id || null
         );
+      } catch (err) {
+        if (err.response?.status === 400) {
+          isFull = true;
+        } else {
+          throw err;
+        }
       }
       // 3. Actualiza nuestro registro interno
       await pool.query(
