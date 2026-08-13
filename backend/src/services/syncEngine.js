@@ -72,7 +72,7 @@ async function initialSync(userId) {
       await logSync({
         userId,
         mappingId: mapping.id,
-        eventType: 'initial_sync',
+        eventType: isFull ? 'sync_skipped_full' : 'initial_sync',
         sourcePlatform: 'tiendanube',
         previousStock: null,
         newStock: tnStock,
