@@ -149,8 +149,18 @@ const items = (order.order_items || []).map(i => ({
       return;
     }
 
-// Recién acá, porque confirmamos que es la PRIMERA vez que vemos esta orden, restamos stock
-    await syncEngine.handleMLSale(userId, String(order.id), items, isFulfillment);
+    // Recién acá, porque confirmamos que es la PRIMERA vez que vemos esta orden, restamos stock.
+    // Si algo falla en el proceso, liberamos la orden para que la próxima notificación
+    // de MELI (que va a reintentar sola) pueda procesarla de nuevo, en vez de perderla para siempre.
+    try {
+      await syncEngine.handleMLSale(userId, String(order.id), items, isFulfillment);
+    } catch (err) {
+      console.error(`Error procesando stock de la orden ${order.id}, se libera para reintento:`, err.message);
+      await pool.query(
+        `DELETE FROM orders WHERE user_id = $1 AND platform = 'mercadolibre' AND platform_order_id = $2`,
+        [userId, String(order.id)]
+      );
+    }
 
   } catch (err) {
     console.error('Error procesando webhook MELI:', err);
