@@ -18,7 +18,6 @@ const mlService = require('./mercadolibre');
 const pendingMLUpdates = new Set();
 
 // Sincronización inicial: trae stock de TN y lo vuelca en MELI
-// Borra el stock ficticio de MELI y pone el real de TN
 async function initialSync(userId) {
   const { rows: mappings } = await pool.query(
     `SELECT * FROM product_mappings WHERE user_id = $1 AND is_active = true`,
@@ -36,7 +35,6 @@ async function initialSync(userId) {
 
   for (const mapping of mappings) {
     try {
-// 1. Lee el stock REAL de TN (siempre, sea Full o no)
       const tnStock = await tnService.getVariantStock(
         tnStore.store_id,
         tnStore.access_token,
@@ -44,7 +42,6 @@ async function initialSync(userId) {
         mapping.tn_variant_id
       );
 
-      // 2. Intenta actualizar MELI directamente. Si rechaza con 400, es FULL puro.
       let isFull = false;
       try {
         await mlService.updateStock(
@@ -60,7 +57,7 @@ async function initialSync(userId) {
           throw err;
         }
       }
-      // 3. Actualiza nuestro registro interno
+
       await pool.query(
         `UPDATE product_mappings 
          SET current_stock = $1, last_synced_at = NOW()
@@ -68,7 +65,6 @@ async function initialSync(userId) {
         [tnStock, mapping.id]
       );
 
-      // 4. Registra en el log
       await logSync({
         userId,
         mappingId: mapping.id,
@@ -90,11 +86,9 @@ async function initialSync(userId) {
 }
 
 // Procesa una venta en TIENDANUBE
-// → busca si hay mapeo → resta en TN (ya lo hizo TN) → actualiza MELI
 async function handleTNSale(userId, orderId, orderItems) {
   for (const item of orderItems) {
     try {
-      // Busca el mapeo por product_id/variant_id de TN
       const { rows } = await pool.query(
         `SELECT * FROM product_mappings 
          WHERE user_id = $1 
@@ -103,33 +97,16 @@ async function handleTNSale(userId, orderId, orderItems) {
          AND is_active = true`,
         [userId, String(item.product_id), String(item.variant_id)]
       );
-      if (!rows[0]) continue; // Este producto no está sincronizado
+      if (!rows[0]) continue;
 
       const mapping = rows[0];
       const previousStock = mapping.current_stock;
-      async function handleTNStockUpdate(userId, productId, variantId, newStock) {
-  try {
-    const { rows } = await pool.query(
-      `SELECT * FROM product_mappings 
-       WHERE user_id = $1 AND tn_product_id = $2 AND tn_variant_id = $3 AND is_active = true`,
-      [userId, String(productId), String(variantId)]
-    );
-    if (!rows[0]) return; // No está sincronizado
-
-    const mapping = rows[0];
-    const previousStock = mapping.current_stock;
-
-    // Si TN nos avisa un valor que ya es igual al que tenemos, no hacemos nada.
-    // Esto evita ruido innecesario y llamadas de más a MELI sin ningún cambio real.
-    if (newStock === previousStock) return;
       const newStock = Math.max(0, previousStock - item.quantity);
 
-      // Marca el update como "nuestro" para ignorar el webhook de MELI
       const updateKey = `${mapping.ml_item_id}_${newStock}`;
       pendingMLUpdates.add(updateKey);
       setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
-      // Actualiza MELI
       await mlService.updateStock(
         userId,
         mapping.ml_item_id,
@@ -137,7 +114,6 @@ async function handleTNSale(userId, orderId, orderItems) {
         mapping.ml_variation_id || null
       );
 
-      // Actualiza nuestro registro
       await pool.query(
         `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
         [newStock, mapping.id]
@@ -161,7 +137,6 @@ async function handleTNSale(userId, orderId, orderItems) {
 }
 
 // Procesa una venta en MERCADO LIBRE
-// → busca mapeo → resta en TN → MELI ya lo descontó solo → actualiza nuestro registro
 async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
   const { rows: storeRows } = await pool.query(
     `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
@@ -201,7 +176,6 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
       const previousStock = mapping.current_stock;
       const newStock = Math.max(0, previousStock - item.quantity);
 
-      // CANDADO: una venta de MELI jamás debe dejar el stock igual o mayor al anterior
       if (newStock >= previousStock && previousStock > 0) {
         console.error(`BLOQUEADO: venta ML orden ${orderId} intentó dejar stock >= anterior (mapping ${mapping.id}, prev=${previousStock}, calc=${newStock})`);
         await logSync({
@@ -238,8 +212,8 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
     throw new Error(`Fallaron ${errors.length} ítem(s) de la orden ${orderId}: ${JSON.stringify(errors)}`);
   }
 }
+
 // Procesa un cambio de stock en TN (restock manual o cambio de producto)
-// → actualiza MELI con el nuevo valor de TN
 async function handleTNStockUpdate(userId, productId, variantId, newStock) {
   try {
     const { rows } = await pool.query(
@@ -247,12 +221,13 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
        WHERE user_id = $1 AND tn_product_id = $2 AND tn_variant_id = $3 AND is_active = true`,
       [userId, String(productId), String(variantId)]
     );
-    if (!rows[0]) return; // No está sincronizado
+    if (!rows[0]) return;
 
     const mapping = rows[0];
     const previousStock = mapping.current_stock;
 
-// Intenta actualizar MELI directamente. Si rechaza con 400, es FULL puro.
+    if (newStock === previousStock) return;
+
     let isFull = false;
     const updateKey = `${mapping.ml_item_id}_${newStock}`;
     pendingMLUpdates.add(updateKey);
@@ -273,7 +248,6 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
       }
     }
 
-    // Esto se ejecuta SIEMPRE, sea Full o no: tu registro queda con el número real de TN
     await pool.query(
       `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
       [newStock, mapping.id]
@@ -295,12 +269,10 @@ async function handleTNStockUpdate(userId, productId, variantId, newStock) {
   }
 }
 
-// Verifica si un update de MELI es nuestro (para evitar loops)
 function isOurMLUpdate(itemId, stock) {
   return pendingMLUpdates.has(`${itemId}_${stock}`);
 }
 
-// Guarda un registro en sync_logs
 async function logSync({ userId, mappingId, eventType, sourcePlatform, previousStock, newStock, quantityChanged, orderId, details }) {
   await pool.query(
     `INSERT INTO sync_logs 
@@ -310,7 +282,6 @@ async function logSync({ userId, mappingId, eventType, sourcePlatform, previousS
   );
 }
 
-// Crea o actualiza un mapeo de producto por SKU
 async function createMapping(userId, { sku, tnProductId, tnVariantId, mlItemId, mlVariationId, tnProductName, mlItemName }) {
   const { rows } = await pool.query(
     `INSERT INTO product_mappings 
