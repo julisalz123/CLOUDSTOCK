@@ -7,14 +7,17 @@
  * - Si hay una venta en MELI → resta en TN → TN actualiza MELI
  * - Si hay un cambio manual en MELI → se IGNORA
  * - Si hay un cambio manual en TN (restock) → actualiza MELI
+ *
+ * IMPORTANTE: antes de calcular cualquier resta, siempre se consulta
+ * el stock REAL de TN en vivo (nunca el "current_stock" cacheado en la DB),
+ * para que ninguna caída de servidor, corrección manual o drift histórico
+ * pueda generar cálculos incorrectos.
  */
 
 const pool = require('../models/db');
 const tnService = require('./tiendanube');
 const mlService = require('./mercadolibre');
 
-// Flag interno para evitar loops: cuando nosotros actualizamos MELI,
-// ignoramos el webhook de cambio que MELI nos enviaría de vuelta
 const pendingMLUpdates = new Set();
 
 // Sincronización inicial: trae stock de TN y lo vuelca en MELI
@@ -86,7 +89,15 @@ async function initialSync(userId) {
 }
 
 // Procesa una venta en TIENDANUBE
+// → TN ya restó su propio stock (es la fuente de verdad) → leemos ese valor real y lo empujamos a MELI
 async function handleTNSale(userId, orderId, orderItems) {
+  const { rows: storeRows } = await pool.query(
+    `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
+    [userId]
+  );
+  if (!storeRows[0]) return;
+  const tnStore = storeRows[0];
+
   for (const item of orderItems) {
     try {
       const { rows } = await pool.query(
@@ -101,32 +112,46 @@ async function handleTNSale(userId, orderId, orderItems) {
 
       const mapping = rows[0];
       const previousStock = mapping.current_stock;
-      const newStock = Math.max(0, previousStock - item.quantity);
 
-      const updateKey = `${mapping.ml_item_id}_${newStock}`;
+      // Leemos el stock REAL y actual de TN (TN ya aplicó la venta, es la verdad)
+      const tnStock = await tnService.getVariantStock(
+        tnStore.store_id, tnStore.access_token,
+        mapping.tn_product_id, mapping.tn_variant_id
+      );
+
+      const updateKey = `${mapping.ml_item_id}_${tnStock}`;
       pendingMLUpdates.add(updateKey);
       setTimeout(() => pendingMLUpdates.delete(updateKey), 30000);
 
-      await mlService.updateStock(
-        userId,
-        mapping.ml_item_id,
-        newStock,
-        mapping.ml_variation_id || null
-      );
+      let isFull = false;
+      try {
+        await mlService.updateStock(
+          userId,
+          mapping.ml_item_id,
+          tnStock,
+          mapping.ml_variation_id || null
+        );
+      } catch (err) {
+        if (err.response?.status === 400) {
+          isFull = true;
+        } else {
+          throw err;
+        }
+      }
 
       await pool.query(
         `UPDATE product_mappings SET current_stock = $1, last_synced_at = NOW() WHERE id = $2`,
-        [newStock, mapping.id]
+        [tnStock, mapping.id]
       );
 
       await logSync({
         userId,
         mappingId: mapping.id,
-        eventType: 'sale_tn',
+        eventType: isFull ? 'sync_skipped_full' : 'sale_tn',
         sourcePlatform: 'tiendanube',
         previousStock,
-        newStock,
-        quantityChanged: -item.quantity,
+        newStock: tnStock,
+        quantityChanged: tnStock - previousStock,
         orderId,
       });
 
@@ -137,6 +162,7 @@ async function handleTNSale(userId, orderId, orderItems) {
 }
 
 // Procesa una venta en MERCADO LIBRE
+// → SIEMPRE lee el stock real y actual de TN antes de restar (nunca confía en el cache)
 async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
   const { rows: storeRows } = await pool.query(
     `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
@@ -173,14 +199,22 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
         continue;
       }
 
-      const previousStock = mapping.current_stock;
-      const newStock = Math.max(0, previousStock - item.quantity);
+      // CLAVE: leemos el stock REAL de TN ahora mismo, no el cacheado en nuestra DB.
+      // Esto evita que cualquier drift (caídas de servidor, correcciones manuales, etc.)
+      // genere cálculos incorrectos.
+      const realTnStock = await tnService.getVariantStock(
+        tnStore.store_id, tnStore.access_token,
+        mapping.tn_product_id, mapping.tn_variant_id
+      );
 
-      if (newStock >= previousStock && previousStock > 0) {
-        console.error(`BLOQUEADO: venta ML orden ${orderId} intentó dejar stock >= anterior (mapping ${mapping.id}, prev=${previousStock}, calc=${newStock})`);
+      const newStock = Math.max(0, realTnStock - item.quantity);
+
+      // CANDADO: una venta jamás debe dejar el stock igual o mayor al real actual
+      if (newStock >= realTnStock && realTnStock > 0) {
+        console.error(`BLOQUEADO: venta ML orden ${orderId} intentó dejar stock >= real (mapping ${mapping.id}, real=${realTnStock}, calc=${newStock})`);
         await logSync({
           userId, mappingId: mapping.id, eventType: 'sale_ml_blocked_suspicious',
-          sourcePlatform: 'mercadolibre', previousStock, newStock: previousStock,
+          sourcePlatform: 'mercadolibre', previousStock: realTnStock, newStock: realTnStock,
           quantityChanged: 0, orderId,
           details: { note: 'Bloqueado: el cálculo no representaba una baja de stock', quantity: item.quantity },
         });
@@ -199,7 +233,7 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
 
       await logSync({
         userId, mappingId: mapping.id, eventType: 'sale_ml', sourcePlatform: 'mercadolibre',
-        previousStock, newStock, quantityChanged: -item.quantity, orderId,
+        previousStock: realTnStock, newStock, quantityChanged: -item.quantity, orderId,
       });
 
     } catch (err) {
