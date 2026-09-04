@@ -107,6 +107,21 @@ async function handleTNSale(userId, orderId, orderItems) {
 
       const mapping = rows[0];
       const previousStock = mapping.current_stock;
+      async function handleTNStockUpdate(userId, productId, variantId, newStock) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM product_mappings 
+       WHERE user_id = $1 AND tn_product_id = $2 AND tn_variant_id = $3 AND is_active = true`,
+      [userId, String(productId), String(variantId)]
+    );
+    if (!rows[0]) return; // No está sincronizado
+
+    const mapping = rows[0];
+    const previousStock = mapping.current_stock;
+
+    // Si TN nos avisa un valor que ya es igual al que tenemos, no hacemos nada.
+    // Esto evita ruido innecesario y llamadas de más a MELI sin ningún cambio real.
+    if (newStock === previousStock) return;
       const newStock = Math.max(0, previousStock - item.quantity);
 
       // Marca el update como "nuestro" para ignorar el webhook de MELI
