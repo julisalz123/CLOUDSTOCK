@@ -152,8 +152,11 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
     `SELECT * FROM stores WHERE user_id = $1 AND platform = 'tiendanube'`,
     [userId]
   );
-  if (!storeRows[0]) return;
+  if (!storeRows[0]) {
+    throw new Error('No hay tienda TN configurada para este usuario');
+  }
   const tnStore = storeRows[0];
+  const errors = [];
 
   for (const item of mlItems) {
     try {
@@ -162,21 +165,19 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
          WHERE user_id = $1 AND ml_item_id = $2 AND is_active = true`,
         [userId, String(item.item_id)]
       );
-      if (!rows[0]) continue;
+      if (!rows[0]) {
+        console.error(`ALERTA: no se encontró mapeo para ml_item_id=${item.item_id} (orden ${orderId}). Venta NO reflejada en TN.`);
+        errors.push({ item_id: item.item_id, error: 'mapeo no encontrado' });
+        continue;
+      }
 
       const mapping = rows[0];
 
       if (isFulfillment) {
-        // Venta de FULL: el stock salió del depósito de MELI, no de TN. No tocar.
         await logSync({
-          userId,
-          mappingId: mapping.id,
-          eventType: 'sale_ml_full_skipped',
-          sourcePlatform: 'mercadolibre',
-          previousStock: mapping.current_stock,
-          newStock: mapping.current_stock,
-          quantityChanged: 0,
-          orderId,
+          userId, mappingId: mapping.id, eventType: 'sale_ml_full_skipped',
+          sourcePlatform: 'mercadolibre', previousStock: mapping.current_stock,
+          newStock: mapping.current_stock, quantityChanged: 0, orderId,
           details: { note: 'Venta Full, no se descuenta TN', quantity: item.quantity },
         });
         continue;
@@ -184,6 +185,18 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
 
       const previousStock = mapping.current_stock;
       const newStock = Math.max(0, previousStock - item.quantity);
+
+      // CANDADO: una venta de MELI jamás debe dejar el stock igual o mayor al anterior
+      if (newStock >= previousStock && previousStock > 0) {
+        console.error(`BLOQUEADO: venta ML orden ${orderId} intentó dejar stock >= anterior (mapping ${mapping.id}, prev=${previousStock}, calc=${newStock})`);
+        await logSync({
+          userId, mappingId: mapping.id, eventType: 'sale_ml_blocked_suspicious',
+          sourcePlatform: 'mercadolibre', previousStock, newStock: previousStock,
+          quantityChanged: 0, orderId,
+          details: { note: 'Bloqueado: el cálculo no representaba una baja de stock', quantity: item.quantity },
+        });
+        continue;
+      }
 
       await tnService.updateVariantStock(
         tnStore.store_id, tnStore.access_token,
@@ -201,8 +214,13 @@ async function handleMLSale(userId, orderId, mlItems, isFulfillment = false) {
       });
 
     } catch (err) {
-      console.error(`Error procesando venta ML para ítem ${item.item_id}:`, err.message);
+      console.error(`Error procesando venta ML para ítem ${item.item_id} (orden ${orderId}):`, err.message);
+      errors.push({ item_id: item.item_id, error: err.message });
     }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Fallaron ${errors.length} ítem(s) de la orden ${orderId}: ${JSON.stringify(errors)}`);
   }
 }
 // Procesa un cambio de stock en TN (restock manual o cambio de producto)
