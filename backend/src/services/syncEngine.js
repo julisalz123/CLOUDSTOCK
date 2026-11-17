@@ -20,8 +20,35 @@ const mlService = require('./mercadolibre');
 
 const pendingMLUpdates = new Set();
 
+// --- Protección contra límite de pedidos (429) en la sincronización general ---
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Reintenta SOLO si la API respondió 429 (demasiados pedidos). Cualquier otro error se devuelve igual que antes.
+async function conReintento429(fn, intentos = 4) {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err.response?.status !== 429 || i >= intentos) throw err;
+      await sleep(2000 * i); // espera 2s, 4s, 6s...
+    }
+  }
+}
+
+let syncGeneralEnCurso = false;
+
 // Sincronización inicial: trae stock de TN y lo vuelca en MELI
 async function initialSync(userId) {
+  if (syncGeneralEnCurso) throw new Error('Ya hay una sincronización general en curso, esperá a que termine');
+  syncGeneralEnCurso = true;
+  try {
+    return await initialSyncInterno(userId);
+  } finally {
+    syncGeneralEnCurso = false;
+  }
+}
+
+async function initialSyncInterno(userId) {
   const { rows: mappings } = await pool.query(
     `SELECT * FROM product_mappings WHERE user_id = $1 AND is_active = true`,
     [userId]
@@ -38,21 +65,23 @@ async function initialSync(userId) {
 
   for (const mapping of mappings) {
     try {
-      const tnStock = await tnService.getVariantStock(
+      await sleep(400); // pausa corta entre productos para no saturar TN/MELI
+
+      const tnStock = await conReintento429(() => tnService.getVariantStock(
         tnStore.store_id,
         tnStore.access_token,
         mapping.tn_product_id,
         mapping.tn_variant_id
-      );
+      ));
 
       let isFull = false;
       try {
-        await mlService.updateStock(
+        await conReintento429(() => mlService.updateStock(
           userId,
           mapping.ml_item_id,
           tnStock,
           mapping.ml_variation_id || null
-        );
+        ));
       } catch (err) {
         if (err.response?.status === 400) {
           isFull = true;

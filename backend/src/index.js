@@ -70,6 +70,27 @@ setInterval(async () => {
   }
 }, 4 * 60 * 60 * 1000);
 
+// Sincronización general automática: 1 vez por día a las 6:00 (hora Argentina)
+// Empuja el stock real de TN a MELI (los items Full se saltean solos, igual que con el botón)
+let ultimoSyncDiario = null;
+setInterval(async () => {
+  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const hoy = ahora.toDateString();
+  if (ahora.getHours() !== 6 || ultimoSyncDiario === hoy) return;
+  ultimoSyncDiario = hoy;
+  try {
+    const db = require('./models/db');
+    const { initialSync } = require('./services/syncEngine');
+    const { rows } = await db.query('SELECT DISTINCT user_id FROM ml_tokens');
+    for (const row of rows) {
+      const r = await initialSync(row.user_id);
+      console.log(`Sync diario user ${row.user_id}: ${r.synced} ok, ${r.errors.length} con error`);
+    }
+  } catch (err) {
+    console.error('Error en sync diario automático:', err.message);
+  }
+}, 10 * 60 * 1000); // revisa cada 10 minutos si ya son las 6
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 SyncStock backend corriendo en puerto ${PORT}`);
   console.log(`📦 Entorno: ${process.env.NODE_ENV || 'development'}`);
