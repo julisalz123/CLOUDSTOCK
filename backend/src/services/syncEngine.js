@@ -364,8 +364,13 @@ async function createMapping(userId, { sku, tnProductId, tnVariantId, mlItemId, 
   return rows[0];
 }
 
+function syncGeneralCorriendo() {
+  return syncGeneralEnCurso;
+}
+
 module.exports = {
   initialSync,
+  syncGeneralCorriendo,
   handleTNSale,
   handleMLSale,
   handleTNStockUpdate,

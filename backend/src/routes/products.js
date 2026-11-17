@@ -155,14 +155,15 @@ router.delete('/mappings/:id', auth, async (req, res) => {
 });
 
 // Sincronización inicial
+// Responde al instante y la sincronización sigue sola en el servidor (tarda varios minutos)
 router.post('/sync/initial', auth, async (req, res) => {
-  try {
-    const results = await syncEngine.initialSync(req.userId);
-    res.json(results);
-  } catch (err) {
-    console.error('Error en sync inicial:', err);
-    res.status(500).json({ error: err.message });
+  if (syncEngine.syncGeneralCorriendo()) {
+    return res.status(409).json({ error: 'Ya hay una sincronización general en curso, esperá a que termine (unos minutos)' });
   }
+  syncEngine.initialSync(req.userId)
+    .then((r) => console.log(`Sync general (botón) terminado: ${r.synced} ok, ${r.errors.length} con error`))
+    .catch((err) => console.error('Error en sync inicial:', err.message));
+  res.json({ started: true, message: 'Sincronización iniciada. Sigue sola en el servidor y tarda unos minutos: podés cerrar la página.' });
 });
 
 // Sync manual de un producto
