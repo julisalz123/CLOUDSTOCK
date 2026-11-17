@@ -38,14 +38,27 @@ async function conReintento429(fn, intentos = 4) {
 let syncGeneralEnCurso = false;
 
 // Sincronización inicial: trae stock de TN y lo vuelca en MELI
+// Estado de la última sincronización general (para mostrarlo en la página)
+let estadoSync = { estado: 'nunca', inicio: null, fin: null, synced: 0, errores: 0, error: null };
+
 async function initialSync(userId) {
   if (syncGeneralEnCurso) throw new Error('Ya hay una sincronización general en curso, esperá a que termine');
   syncGeneralEnCurso = true;
+  estadoSync = { estado: 'corriendo', inicio: new Date(), fin: null, synced: 0, errores: 0, error: null };
   try {
-    return await initialSyncInterno(userId);
+    const r = await initialSyncInterno(userId);
+    estadoSync = { ...estadoSync, estado: 'terminado', fin: new Date(), synced: r.synced, errores: r.errors.length };
+    return r;
+  } catch (err) {
+    estadoSync = { ...estadoSync, estado: 'error', fin: new Date(), error: err.message };
+    throw err;
   } finally {
     syncGeneralEnCurso = false;
   }
+}
+
+function getEstadoSync() {
+  return estadoSync;
 }
 
 async function initialSyncInterno(userId) {
@@ -371,6 +384,7 @@ function syncGeneralCorriendo() {
 module.exports = {
   initialSync,
   syncGeneralCorriendo,
+  getEstadoSync,
   handleTNSale,
   handleMLSale,
   handleTNStockUpdate,

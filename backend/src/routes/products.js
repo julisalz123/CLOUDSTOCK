@@ -155,6 +155,11 @@ router.delete('/mappings/:id', auth, async (req, res) => {
 });
 
 // Sincronización inicial
+// Estado de la última sincronización general
+router.get('/sync/status', auth, (req, res) => {
+  res.json(syncEngine.getEstadoSync());
+});
+
 // Responde al instante y la sincronización sigue sola en el servidor (tarda varios minutos)
 router.post('/sync/initial', auth, async (req, res) => {
   if (syncEngine.syncGeneralCorriendo()) {
